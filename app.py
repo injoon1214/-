@@ -41,19 +41,26 @@ except Exception:
 mode = st.radio("🎮 게임 모드 선택", ["🤖 AI 대전 (혼자하기)", "👥 2인 대전 (친구와 같이)"], horizontal=True)
 game_mode = "AI" if "AI" in mode else "PVP"
 
+# 게임 ID 관리 (위젯 key 초기화용)
+if "board_id" not in st.session_state:
+    st.session_state.board_id = 0
+
 # 게임 상태 초기화 및 모드 변경 시 리셋
 if "board_state" not in st.session_state or st.session_state.get("prev_mode") != game_mode:
     st.session_state.board_state = [[0] * GRID_SIZE for _ in range(GRID_SIZE)]
-    st.session_state.current_player = 1  # 1: 흑돌, 2: 백돌
+    st.session_state.current_player = 1  # 1: 흑돌(플레이어), 2: 백돌(AI 또는 상대)
     st.session_state.winner = None
     st.session_state.last_click = None
     st.session_state.prev_mode = game_mode
+    st.session_state.board_id += 1
 
 def reset_game():
+    """게임판과 좌표 기록을 초기화"""
     st.session_state.board_state = [[0] * GRID_SIZE for _ in range(GRID_SIZE)]
     st.session_state.current_player = 1
     st.session_state.winner = None
     st.session_state.last_click = None
+    st.session_state.board_id += 1
 
 def check_win(board, r, c, player):
     directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
@@ -69,7 +76,7 @@ def check_win(board, r, c, player):
             return True
     return False
 
-# --- AI 가중치 계산 로직 ---
+# AI 가중치 계산 로직
 def evaluate_position(board, r, c, player):
     score = 0
     directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
@@ -158,46 +165,46 @@ if st.session_state.winner:
     st.success(f"🎉 {winner_name} 승리!")
 else:
     if game_mode == "AI":
-        turn_name = "흑돌(●) - 당신의 차례입니다"
+        turn_name = "흑돌(●) - 당신의 차례입니다" if st.session_state.current_player == 1 else "🤖 AI가 생각 중입니다..."
     else:
         turn_name = "흑돌(●) 차례입니다" if st.session_state.current_player == 1 else "백돌(○) 차례입니다"
     st.info(f"현재 상태: {turn_name}")
 
-# 마우스 클릭 위치 감지
-coords = streamlit_image_coordinates(current_img, key="omok_board")
+# 좌표 클릭 감지 위젯
+coords = streamlit_image_coordinates(current_img, key=f"omok_board_{st.session_state.board_id}")
 
-# 클릭 처리
+# 1. 플레이어 착수 처리 (흑돌)
 if coords and coords != st.session_state.last_click and not st.session_state.winner:
-    st.session_state.last_click = coords
-    click_x, click_y = coords["x"], coords["y"]
-    
-    col = int(round((click_x - margin) / cell_size))
-    row = int(round((click_y - margin) / cell_size))
-    
-    if 0 <= row < GRID_SIZE and 0 <= col < GRID_SIZE:
-        board = st.session_state.board_state
-        current_p = st.session_state.current_player
+    # AI 모드에서는 내 차례(1)일 때만 클릭 허용
+    if game_mode == "PVP" or (game_mode == "AI" and st.session_state.current_player == 1):
+        st.session_state.last_click = coords
+        click_x, click_y = coords["x"], coords["y"]
         
-        if board[row][col] == 0:
-            # 플레이어 착수
-            board[row][col] = current_p
+        col = int(round((click_x - margin) / cell_size))
+        row = int(round((click_y - margin) / cell_size))
+        
+        if 0 <= row < GRID_SIZE and 0 <= col < GRID_SIZE:
+            board = st.session_state.board_state
+            current_p = st.session_state.current_player
             
-            if check_win(board, row, col, current_p):
-                st.session_state.winner = current_p
-            else:
-                if game_mode == "AI":
-                    # AI 모드: 플레이어 착수 후 AI가 즉시 수비/공격 위치에 착수
-                    ai_r, ai_c = get_ai_move(board)
-                    board[ai_r][ai_c] = 2
-                    if check_win(board, ai_r, ai_c, 2):
-                        st.session_state.winner = 2
-                    else:
-                        st.session_state.current_player = 1
+            if board[row][col] == 0:
+                board[row][col] = current_p
+                if check_win(board, row, col, current_p):
+                    st.session_state.winner = current_p
                 else:
-                    # 2인 대전 모드: 턴 교대
                     st.session_state.current_player = 3 - current_p
-                    
-            st.rerun()
+                st.rerun()
+
+# 2. AI 착수 처리 (백돌 - 플레이어가 둔 후 다음 렌더링에서 따로 실행)
+if game_mode == "AI" and st.session_state.current_player == 2 and not st.session_state.winner:
+    board = st.session_state.board_state
+    ai_r, ai_c = get_ai_move(board)
+    board[ai_r][ai_c] = 2
+    if check_win(board, ai_r, ai_c, 2):
+        st.session_state.winner = 2
+    else:
+        st.session_state.current_player = 1
+    st.rerun()
 
 # 리셋 버튼
 if st.button("🔄 게임 다시 시작"):
